@@ -12,6 +12,7 @@ AMAZON_DISABLED=0
 C_STARTER=0
 C_AMAZON=0
 C_HOME=0
+STATE_CREATED=0
 log(){ printf '[TVOS] %s\n' "$*" >&2; }
 starter_hidden(){ dumpsys package "$STARTER" | grep -F 'User 0:' | grep -Fq 'installed=true hidden=true'; }
 amazon_disabled(){ dumpsys package com.amazon.tv.launcher | sed -n '/disabledComponents:/,/^[^ ]/p' | grep -Fq 'com.amazon.tv.launcher.ui.HomeActivity_vNext'; }
@@ -21,7 +22,7 @@ rollback(){
   if [ "$C_HOME" = 1 ]; then cmd package set-home-activity "$OLD_HOME" >/dev/null 2>&1 || bad=1; fi
   if [ "$C_AMAZON" = 1 ]; then pm enable "$AMAZON_HOME" >/dev/null 2>&1 || bad=1; amazon_disabled && bad=1; fi
   if [ "$C_STARTER" = 1 ]; then pm unhide --user 0 "$STARTER" >/dev/null 2>&1 || bad=1; starter_hidden && bad=1; fi
-  if [ "$bad" = 0 ]; then rm -f "$STATE" "$TMP"; log ROLLBACK=PASS; else log ROLLBACK=FAIL; fi
+  if [ "$bad" = 0 ]; then [ "$STATE_CREATED" = 1 ] && rm -f "$STATE" "$TMP"; log ROLLBACK=PASS; else log ROLLBACK=FAIL; fi
 }
 fail(){ log "FAIL $1"; rollback; printf 'TVOS_HOME=FAIL\n'; exit 1; }
 check(){ [ "$(getprop "$1")" = "$2" ] || fail "identity-$1"; }
@@ -50,6 +51,7 @@ umask 077
   printf 'AMAZON_DISABLED=%s\n' "$AMAZON_DISABLED"
 } > "$TMP" || fail state-write
 mv "$TMP" "$STATE" || fail state-commit
+STATE_CREATED=1
 log "STATE_SAVED=$STATE"
 if [ "$STARTER_HIDDEN" = 0 ]; then
   pm hide --user 0 "$STARTER" >/dev/null 2>&1 || fail hide-firehomestarter
