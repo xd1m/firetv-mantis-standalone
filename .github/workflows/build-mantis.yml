@@ -51,7 +51,7 @@ jobs:
           CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang"
           make -C "$RUNNER_TEMP/GhostLock" NDK="$NDK" CC="$CC" API=24
           install -D -m 0755 "$RUNNER_TEMP/GhostLock/build/ghostlock_root" "$RUNNER_TEMP/output/ghostlock_root"
-          install -D -m 0644 "$GITHUB_WORKSPACE/profiles/mantis-NS6711-5908.conf" "$RUNNER_TEMP/output/mantis-NS6711-5908.conf"
+          install -D -m 0644 "$RUNNER_TEMP/GhostLock/profiles/mantis-NS6711-5908.conf" "$RUNNER_TEMP/output/mantis-NS6711-5908.conf"
           file "$RUNNER_TEMP/output/ghostlock_root"
           readelf -h "$RUNNER_TEMP/output/ghostlock_root" | grep -E 'Class:|Machine:'
           sha256sum "$RUNNER_TEMP/output/ghostlock_root" "$RUNNER_TEMP/output/mantis-NS6711-5908.conf" | tee "$RUNNER_TEMP/output/SHA256SUMS"
