@@ -18,9 +18,9 @@ amazon_disabled(){ dumpsys package com.amazon.tv.launcher | sed -n '/disabledCom
 home_is_tvos(){ x=$(cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME 2>/dev/null | tail -n 1); [ "$x" = "$TVOS" ]; }
 rollback(){
   bad=0
-  [ "$C_HOME" = 1 ] && cmd package set-home-activity "$OLD_HOME" >/dev/null 2>&1 || :
-  if [ "$C_AMAZON" = 1 ]; then pm enable "$AMAZON_HOME" >/dev/null 2>&1 || bad=1; fi
-  if [ "$C_STARTER" = 1 ]; then pm unhide --user 0 "$STARTER" >/dev/null 2>&1 || bad=1; fi
+  if [ "$C_HOME" = 1 ]; then cmd package set-home-activity "$OLD_HOME" >/dev/null 2>&1 || bad=1; fi
+  if [ "$C_AMAZON" = 1 ]; then pm enable "$AMAZON_HOME" >/dev/null 2>&1 || bad=1; amazon_disabled && bad=1; fi
+  if [ "$C_STARTER" = 1 ]; then pm unhide --user 0 "$STARTER" >/dev/null 2>&1 || bad=1; starter_hidden && bad=1; fi
   if [ "$bad" = 0 ]; then rm -f "$STATE" "$TMP"; log ROLLBACK=PASS; else log ROLLBACK=FAIL; fi
 }
 fail(){ log "FAIL $1"; rollback; printf 'TVOS_HOME=FAIL\n'; exit 1; }
@@ -53,13 +53,13 @@ mv "$TMP" "$STATE" || fail state-commit
 log "STATE_SAVED=$STATE"
 if [ "$STARTER_HIDDEN" = 0 ]; then
   pm hide --user 0 "$STARTER" >/dev/null 2>&1 || fail hide-firehomestarter
-  starter_hidden || fail verify-hidden-firehomestarter
   C_STARTER=1
+  starter_hidden || fail verify-hidden-firehomestarter
 fi
 if [ "$AMAZON_DISABLED" = 0 ]; then
   pm disable "$AMAZON_HOME" >/dev/null 2>&1 || fail disable-stock-home
-  amazon_disabled || fail verify-disabled-stock-home
   C_AMAZON=1
+  amazon_disabled || fail verify-disabled-stock-home
 fi
 cmd package set-home-activity "$TVOS" >/dev/null 2>&1 || fail set-tvos-home
 C_HOME=1
