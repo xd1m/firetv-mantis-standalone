@@ -1,98 +1,70 @@
 #!/system/bin/sh
-# Exact-build, one-shot root action for tvOS Launcher only.
-# Invoked by GhostLock with UID 0. Does not install apps or alter other packages.
+# Reversible tvOS Home-only change for the exact supported AFTMM build.
 set -u
-
-PKG_TVOS=com.techgenius.tvoslauncher
-TVOS_COMPONENT=com.techgenius.tvoslauncher/.MainActivity
-PKG_STARTER=com.amazon.firehomestarter
-STARTER_COMPONENT=com.amazon.firehomestarter/.HomeStarterActivity
-AMAZON_HOME_COMPONENT=com.amazon.tv.launcher/.ui.HomeActivity_vNext
-CHANGED_STARTER=0
-CHANGED_AMAZON_HOME=0
-CHANGED_HOME_DEFAULT=0
+STATE=/data/local/tmp/tvos-home-state
+TMP=/data/local/tmp/tvos-home-state.tmp
+TVOS=com.techgenius.tvoslauncher/.MainActivity
+STARTER=com.amazon.firehomestarter
+AMAZON_HOME=com.amazon.tv.launcher/.ui.HomeActivity_vNext
 OLD_HOME=
-
-log() { printf '[TVOS] %s\n' "$*" >&2; }
-fail() { log "FAIL $*"; rollback; printf '%s\n' 'TVOS_HOME=FAIL'; exit 1; }
-
-expect_prop() {
-  actual=$(getprop "$1") || fail "getprop-$1"
-  [ "$actual" = "$2" ] || fail "identity-$1"
+STARTER_HIDDEN=0
+AMAZON_DISABLED=0
+C_STARTER=0
+C_AMAZON=0
+C_HOME=0
+log(){ printf '[TVOS] %s\n' "$*" >&2; }
+starter_hidden(){ dumpsys package "$STARTER" | grep -F 'User 0:' | grep -Fq 'installed=true hidden=true'; }
+amazon_disabled(){ dumpsys package com.amazon.tv.launcher | sed -n '/disabledComponents:/,/^[^ ]/p' | grep -Fq 'com.amazon.tv.launcher.ui.HomeActivity_vNext'; }
+home_is_tvos(){ x=$(cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME 2>/dev/null | tail -n 1); [ "$x" = "$TVOS" ]; }
+rollback(){
+  bad=0
+  [ "$C_HOME" = 1 ] && cmd package set-home-activity "$OLD_HOME" >/dev/null 2>&1 || :
+  if [ "$C_AMAZON" = 1 ]; then pm enable "$AMAZON_HOME" >/dev/null 2>&1 || bad=1; fi
+  if [ "$C_STARTER" = 1 ]; then pm unhide --user 0 "$STARTER" >/dev/null 2>&1 || bad=1; fi
+  if [ "$bad" = 0 ]; then rm -f "$STATE" "$TMP"; log ROLLBACK=PASS; else log ROLLBACK=FAIL; fi
 }
-starter_hidden() {
-  dumpsys package "$PKG_STARTER" | grep -F 'User 0:' | grep -Fq 'installed=true hidden=true'
-}
-amazon_home_disabled() {
-  dumpsys package com.amazon.tv.launcher |
-    sed -n '/disabledComponents:/,/^[^ ]/p' |
-    grep -Fq 'com.amazon.tv.launcher.ui.HomeActivity_vNext'
-}
-tvos_resolves() {
-  resolved=$(cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME 2>/dev/null | tail -n 1)
-  [ "$resolved" = "$TVOS_COMPONENT" ]
-}
-
-rollback() {
-  rollback_failed=0
-  if [ "$CHANGED_HOME_DEFAULT" = 1 ] && [ -n "$OLD_HOME" ]; then
-    cmd package set-home-activity "$OLD_HOME" >/dev/null 2>&1 || rollback_failed=1
-  fi
-  if [ "$CHANGED_AMAZON_HOME" = 1 ]; then
-    pm enable "$AMAZON_HOME_COMPONENT" >/dev/null 2>&1 || rollback_failed=1
-    amazon_home_disabled && rollback_failed=1
-  fi
-  if [ "$CHANGED_STARTER" = 1 ]; then
-    pm unhide --user 0 "$PKG_STARTER" >/dev/null 2>&1 || rollback_failed=1
-    starter_hidden && rollback_failed=1
-  fi
-  if [ "$rollback_failed" = 0 ]; then log 'ROLLBACK=PASS'; else log 'ROLLBACK=FAIL'; fi
-}
-
-expect_prop ro.product.manufacturer Amazon
-expect_prop ro.product.model AFTMM
-expect_prop ro.product.device mantis
-expect_prop ro.build.id NS6711
-expect_prop ro.build.version.incremental 0011644900484
-expect_prop ro.build.fingerprint 'Amazon/mantis/mantis:6.0/NS6711/5908N:user/amz-p,release-keys'
+fail(){ log "FAIL $1"; rollback; printf 'TVOS_HOME=FAIL\n'; exit 1; }
+check(){ [ "$(getprop "$1")" = "$2" ] || fail "identity-$1"; }
+check ro.product.manufacturer Amazon
+check ro.product.model AFTMM
+check ro.product.device mantis
+check ro.build.id NS6711
+check ro.build.version.incremental 0011644900484
+check ro.build.fingerprint 'Amazon/mantis/mantis:6.0/NS6711/5908N:user/amz-p,release-keys'
 [ "$(uname -r)" = '4.4.120+' ] || fail kernel-release
 [ "$(uname -m)" = armv7l ] || fail kernel-machine
 [ "$(id -u)" = 0 ] || fail not-root
-[ "$(getenforce)" = Enforcing ] || fail selinux-not-enforcing
-
-# Confirm the intended launcher exists and can be launched before changing Home.
-cmd package path "$PKG_TVOS" >/dev/null 2>&1 || fail tvos-package-missing
-cmd package resolve-activity --brief -n "$TVOS_COMPONENT" >/dev/null 2>&1 || fail tvos-activity-missing
-
+[ "$(getenforce)" = Enforcing ] || fail selinux
+[ ! -e "$STATE" ] || fail state-already-exists
+cmd package path com.techgenius.tvoslauncher >/dev/null 2>&1 || fail tvos-package-missing
+cmd package resolve-activity --brief -n "$TVOS" >/dev/null 2>&1 || fail tvos-activity-missing
 OLD_HOME=$(cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME 2>/dev/null | tail -n 1)
-[ -n "$OLD_HOME" ] || fail cannot-read-current-home
-log "ORIGINAL_HOME=$OLD_HOME"
-
-if ! starter_hidden; then
-  pm hide --user 0 "$PKG_STARTER" >/dev/null 2>&1 || fail hide-firehomestarter
+[ "$OLD_HOME" = "$AMAZON_HOME" ] || fail unexpected-current-home
+starter_hidden && STARTER_HIDDEN=1
+amazon_disabled && AMAZON_DISABLED=1
+umask 077
+{
+  printf 'VERSION=1\n'
+  printf 'OLD_HOME=%s\n' "$OLD_HOME"
+  printf 'STARTER_HIDDEN=%s\n' "$STARTER_HIDDEN"
+  printf 'AMAZON_DISABLED=%s\n' "$AMAZON_DISABLED"
+} > "$TMP" || fail state-write
+mv "$TMP" "$STATE" || fail state-commit
+log "STATE_SAVED=$STATE"
+if [ "$STARTER_HIDDEN" = 0 ]; then
+  pm hide --user 0 "$STARTER" >/dev/null 2>&1 || fail hide-firehomestarter
   starter_hidden || fail verify-hidden-firehomestarter
-  CHANGED_STARTER=1
-  log "CHANGED hidden $PKG_STARTER"
-else
-  log "UNCHANGED already-hidden $PKG_STARTER"
+  C_STARTER=1
 fi
-
-if ! amazon_home_disabled; then
-  pm disable "$AMAZON_HOME_COMPONENT" >/dev/null 2>&1 || fail disable-amazon-home-activity
-  amazon_home_disabled || fail verify-disabled-amazon-home-activity
-  CHANGED_AMAZON_HOME=1
-  log "CHANGED disabled $AMAZON_HOME_COMPONENT"
-else
-  log "UNCHANGED already-disabled $AMAZON_HOME_COMPONENT"
+if [ "$AMAZON_DISABLED" = 0 ]; then
+  pm disable "$AMAZON_HOME" >/dev/null 2>&1 || fail disable-stock-home
+  amazon_disabled || fail verify-disabled-stock-home
+  C_AMAZON=1
 fi
-
-cmd package set-home-activity "$TVOS_COMPONENT" >/dev/null 2>&1 || fail set-tvos-home
-CHANGED_HOME_DEFAULT=1
-tvos_resolves || fail verify-tvos-home-resolver
-log "CHANGED default-home $TVOS_COMPONENT"
-
-am start -n "$TVOS_COMPONENT" >/dev/null 2>&1 || fail launch-tvos
-log 'DIRECT_LAUNCH=PASS'
+cmd package set-home-activity "$TVOS" >/dev/null 2>&1 || fail set-tvos-home
+C_HOME=1
+home_is_tvos || fail verify-home-resolver
+am start -n "$TVOS" >/dev/null 2>&1 || fail launch-tvos
 log 'HOME_RESOLVER=PASS'
-printf '%s\n' 'TVOS_HOME=PASS'
+printf 'TVOS_HOME=PASS\n'
 exit 0
