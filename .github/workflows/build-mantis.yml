@@ -1,0 +1,63 @@
+name: Build Mantis temporary-root binary
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git make unzip
+
+      - name: Download and verify Android NDK r30
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl --fail --location --retry 3 \
+            https://dl.google.com/android/repository/android-ndk-r30-linux.zip \
+            --output android-ndk-r30-linux.zip
+          echo "5107f898313790e449e87eee2183d9a20602dee9  android-ndk-r30-linux.zip" | sha1sum --check
+          unzip -q android-ndk-r30-linux.zip
+          test -x android-ndk-r30/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang
+          grep -Eq '^Pkg\.Revision[[:space:]]*=[[:space:]]*30\.0\.16248370[[:space:]]*$' android-ndk-r30/source.properties
+
+      - name: Fetch pinned GhostLock source and apply Mantis patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --no-checkout https://github.com/R0rt1z2/GhostLock.git "$RUNNER_TEMP/GhostLock"
+          git -C "$RUNNER_TEMP/GhostLock" fetch --depth 1 origin 2e73c256ff0205de6d08ea0996d15f4700e23fdc
+          git -C "$RUNNER_TEMP/GhostLock" checkout --detach 2e73c256ff0205de6d08ea0996d15f4700e23fdc
+          git -C "$RUNNER_TEMP/GhostLock" am "$GITHUB_WORKSPACE/exploit/patches/0001-feat-add-exact-Mantis-exec-only-root-port.patch"
+
+      - name: Build ARMv7 binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          NDK="$RUNNER_TEMP/android-ndk-r30"
+          CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang"
+          make -C "$RUNNER_TEMP/GhostLock" NDK="$NDK" CC="$CC" API=24
+          install -D -m 0755 "$RUNNER_TEMP/GhostLock/build/ghostlock_root" "$RUNNER_TEMP/output/ghostlock_root"
+          install -D -m 0644 "$GITHUB_WORKSPACE/profiles/mantis-NS6711-5908.conf" "$RUNNER_TEMP/output/mantis-NS6711-5908.conf"
+          file "$RUNNER_TEMP/output/ghostlock_root"
+          readelf -h "$RUNNER_TEMP/output/ghostlock_root" | grep -E 'Class:|Machine:'
+          sha256sum "$RUNNER_TEMP/output/ghostlock_root" "$RUNNER_TEMP/output/mantis-NS6711-5908.conf" | tee "$RUNNER_TEMP/output/SHA256SUMS"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mantis-ns6711-armv7-build
+          path: ${{ runner.temp }}/output/
+          if-no-files-found: error
+          retention-days: 1
