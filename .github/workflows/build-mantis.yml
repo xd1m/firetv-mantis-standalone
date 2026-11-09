@@ -39,6 +39,8 @@ jobs:
           git clone --no-checkout https://github.com/R0rt1z2/GhostLock.git "$RUNNER_TEMP/GhostLock"
           git -C "$RUNNER_TEMP/GhostLock" fetch --depth 1 origin 2e73c256ff0205de6d08ea0996d15f4700e23fdc
           git -C "$RUNNER_TEMP/GhostLock" checkout --detach 2e73c256ff0205de6d08ea0996d15f4700e23fdc
+          git -C "$RUNNER_TEMP/GhostLock" config user.name "GitHub Actions Builder"
+          git -C "$RUNNER_TEMP/GhostLock" config user.email "actions@users.noreply.github.com"
           git -C "$RUNNER_TEMP/GhostLock" am "$GITHUB_WORKSPACE/exploit/patches/0001-feat-add-exact-Mantis-exec-only-root-port.patch"
 
       - name: Build ARMv7 binary
